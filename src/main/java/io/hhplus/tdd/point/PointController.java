@@ -22,7 +22,7 @@ public class PointController {
     @GetMapping("{id}")
     public UserPoint point(@PathVariable long id) {
         UserPoint userpoint = pointService.getUserPoint(id);
-        System.out.println("C)포인트 조회 = " + userpoint);
+        // System.out.println("C)포인트 조회 = " + userpoint);
 
         return userpoint;
     }
@@ -33,7 +33,7 @@ public class PointController {
     @GetMapping("{id}/histories")
     public List<PointHistory> history(@PathVariable long id) {
         List<PointHistory> histories = pointService.getUserHistories(id);
-        System.out.println("C)포인트 충전/사용 내역 조회 = " + histories);
+        // System.out.println("C)포인트 충전/사용 내역 조회 = " + histories);
         return histories;
     }
 
@@ -43,7 +43,7 @@ public class PointController {
     @PatchMapping("{id}/charge")
     public UserPoint charge(@PathVariable long id, @RequestBody long amount) {
         UserPoint updatedPoint = pointService.chargePoint(id, amount);
-        System.out.println("C)포인트 충전 = " + updatedPoint);
+        // System.out.println("C)포인트 충전 = " + updatedPoint);
         return updatedPoint;
     }
 
@@ -53,7 +53,7 @@ public class PointController {
     @PatchMapping("{id}/use")
     public UserPoint use(@PathVariable long id, @RequestBody long amount) {
         UserPoint updatedPoint = pointService.usePoint(id, amount);
-        System.out.println("C)포인트 사용 = " + updatedPoint);
+        // System.out.println("C)포인트 사용 = " + updatedPoint);
         return updatedPoint;
     }
 }
