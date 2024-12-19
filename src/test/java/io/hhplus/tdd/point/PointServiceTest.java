@@ -3,6 +3,7 @@ package io.hhplus.tdd.point;
 import io.hhplus.tdd.ErrorResponse;
 import io.hhplus.tdd.database.UserPointTable;
 import io.hhplus.tdd.database.PointHistoryTable;
+import io.hhplus.tdd.util.UserRequestQueue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -11,8 +12,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -222,4 +224,135 @@ class PointServiceTest {
                 .isInstanceOf(IllegalArgumentException.class) // 예외 타입
                 .hasMessageContaining("보유 포인트는 0원 이하일 수 없습니다."); // 예외 메시지 검증
     }
+
+    // 5. 동시성 큐방식
+    @Test
+    void 동시성_요청_순서대로_처리_확인_로그만으로_확인() throws InterruptedException {
+
+        // 1. 사용자별 요청 큐 생성 -> FIFO(선입선출)
+        UserRequestQueue queue = new UserRequestQueue();
+
+        // 2. 뒤죽박죽 랜덤으로 작업 생성
+        Random random = new Random();
+        int totalRandomTasks = random.nextInt(20) + 10; // 랜덤 작업 수 (10~30개)
+        List<String> generatedRequestsLog = new ArrayList<>(); // 요청 생성 로그
+        Map<Long, List<String>> userTaskLogs = new ConcurrentHashMap<>(); // 사용자별 처리 로그
+
+        for (int i = 0; i < totalRandomTasks; i++) {
+            // 랜덤 사용자 ID (1~3)
+            long userId = random.nextInt(3) + 1;
+
+            // 랜덤 작업 내용 생성
+            String action = switch (random.nextInt(3)) {
+                case 0 -> "조회";
+                case 1 -> "사용";
+                default -> "충전";
+            };
+
+            // 요청 로그 저장
+            String logEntry = "생성된 요청 -> 사용자: " + userId + ", 작업: " + action;
+            generatedRequestsLog.add(logEntry); // 요청 로그 저장
+
+            // 작업 추가
+            queue.addToQueue(userId, () -> {
+                userTaskLogs.computeIfAbsent(userId, k -> new ArrayList<>())
+                        .add("처리된 요청 -> 사용자: " + userId + ", 작업: " + action);
+            });
+        }
+
+        // 3. 사용자별 독립 작업 쓰레드 생성
+        Set<Long> userIds = queue.getUserIds();
+        List<Thread> threads = new ArrayList<>();
+
+        for (Long userId : userIds) {
+            Thread thread = new Thread(() -> {
+                try {
+                    while (queue.hasPendingTasks(userId)) {
+                        Runnable task = queue.getNextTask(userId);
+                        if (task != null) {
+                            task.run();
+                        }
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            threads.add(thread);
+            thread.start();
+        }
+
+        // 4. 모든 쓰레드 종료 대기
+        for (Thread thread : threads) {
+            thread.join();
+        }
+
+        // 5. 생성된 요청과 처리된 요청 비교
+        System.out.println("\n=== 요청 생성 순서 ===");
+        generatedRequestsLog.forEach(System.out::println);
+
+        System.out.println("\n=== 처리된 요청 순서 ===");
+        userTaskLogs.forEach((userId, tasks) -> tasks.forEach(System.out::println));
+    }
+
+    @Test
+    void 동시성_요청_순서대로_처리_확인() throws InterruptedException {
+        // 1. 사용자별 요청 큐 생성, FIFO(선입선출) -> 동시에 여러 요청이 들어오더라도 순서대로
+        UserRequestQueue queue = new UserRequestQueue();
+
+        // 2. Mock 데이터 준비
+        when(userPointTable.selectById(anyLong())).thenAnswer(invocation -> {
+            long userId = invocation.getArgument(0);
+            return new UserPoint(userId, 100_000L * userId, System.currentTimeMillis());
+        });
+
+        // 3. 요청 큐에 작업 추가
+        queue.addToQueue(1L, () -> pointService.chargePoint(1L, 20_000L));
+        queue.addToQueue(2L, () -> pointService.usePoint(2L, 10_000L));
+        queue.addToQueue(3L, () -> pointService.getUserPoint(3L));
+        queue.addToQueue(1L, () -> pointService.usePoint(1L, 5_000L));
+        queue.addToQueue(2L, () -> pointService.chargePoint(2L, 15_000L));
+
+        // 4. 사용자별 독립 작업 쓰레드 생성 (동시성 제어에 대한 통합 테스트 작성)
+        ExecutorService executorService = Executors.newFixedThreadPool(3);
+        Set<Long> userIds = queue.getUserIds();
+        CountDownLatch latch = new CountDownLatch(queue.getTotalTaskCount());
+
+        for (Long userId : userIds) {
+            executorService.submit(() -> {
+                try {
+                    while (queue.hasPendingTasks(userId)) {
+                        Runnable task = queue.getNextTask(userId);
+                        if (task != null) {
+                            task.run();
+                            latch.countDown();
+                        }
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+        }
+
+        // 5. 모든 작업 완료 대기
+        boolean completed = latch.await(10, TimeUnit.SECONDS);
+        assertTrue(completed, "모든 요청이 처리되지 않았습니다!");
+
+        // 6. 쓰레드 풀 종료
+        executorService.shutdown();
+
+        // 7. 검증 (내부 의존성 호출 검증)
+        verify(userPointTable, atLeastOnce()).selectById(1L);
+        verify(userPointTable, atLeastOnce()).selectById(2L);
+        verify(userPointTable, atLeastOnce()).selectById(3L);
+    }
+
+
+
+
+
+
+
+
+
+
 }

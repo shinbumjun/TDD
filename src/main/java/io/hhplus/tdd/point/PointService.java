@@ -104,14 +104,12 @@ public class PointService {
         }
 
         UserPoint userPoint = userPointTable.selectById(userId); // 특정 사용자 포인트 조회 (*****중복 코드)
-        long updatedBalance;
 
         if (userPoint == null) { // 새 사용자
-            updatedBalance = amount; // 입력된 금액이 잔고로 설정
-            userPoint = userPointTable.insertOrUpdate(userId, updatedBalance); // 새로운 포인트 정보 저장
+            userPoint = userPointTable.insertOrUpdate(userId, amount); // 새로운 포인트 정보 저장
         } else { // 해당 사용자의 포인트가 존재
-            updatedBalance = userPoint.point() + amount; // 현재 포인트(가짜 객체에 9_000_000L) + 충전 포인트
-            if (updatedBalance > 10_000_000) { // 최대 잔고 초과
+            long updatedBalance = userPoint.point() + amount; // 현재 포인트(가짜 객체에 9_000_000L) + 충전 포인트
+            if (updatedBalance > MAX_POINT_BALANCE) { // 최대 잔고 초과
                 throw new IllegalArgumentException("보유 포인트는 1000만원 이상일 수 없습니다.");
             }
             userPoint = userPointTable.insertOrUpdate(userId, updatedBalance);
