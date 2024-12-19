@@ -313,18 +313,21 @@ class PointServiceTest {
         queue.addToQueue(2L, () -> pointService.chargePoint(2L, 15_000L));
 
         // 4. 사용자별 독립 작업 쓰레드 생성 (동시성 제어에 대한 통합 테스트 작성)
-        ExecutorService executorService = Executors.newFixedThreadPool(3);
-        Set<Long> userIds = queue.getUserIds();
-        CountDownLatch latch = new CountDownLatch(queue.getTotalTaskCount());
+        ExecutorService executorService = Executors.newFixedThreadPool(3); // 최대 3개의 쓰레드
+        Set<Long> userIds = queue.getUserIds(); // 요청 큐에 등록된 모든 사용자 ID를 가져옴
+        System.out.println("모든 사용자 ID" + userIds); // [1, 2, 3]
+        CountDownLatch latch = new CountDownLatch(queue.getTotalTaskCount()); // 작업 개수
+        System.out.println("작업 개수" + latch); // [Count = 5]
 
+        // 5. 사용자 작업 큐 처리 -> 각 작업이 완료될 때마다 CountDownLatch를 감소
         for (Long userId : userIds) {
             executorService.submit(() -> {
                 try {
-                    while (queue.hasPendingTasks(userId)) {
-                        Runnable task = queue.getNextTask(userId);
+                    while (queue.hasPendingTasks(userId)) { // 해당 사용자의 작업 큐에 작업이 남아 있는지
+                        Runnable task = queue.getNextTask(userId); // 사용자 작업 큐에서 다음 작업을 가져옴
                         if (task != null) {
-                            task.run();
-                            latch.countDown();
+                            task.run(); // Runnable 작업을 실행
+                            latch.countDown(); // 작업이 완료되었음을 표시
                         }
                     }
                 } catch (InterruptedException e) {
